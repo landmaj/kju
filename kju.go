@@ -66,11 +66,38 @@ func (f *kju) QueueTask(
 	query := "INSERT INTO tasks (status, task, Data) VALUES ($1, $2, $3) RETURNING ID"
 	err = f.db.QueryRow(ctx, query, statusCreated, name, data).Scan(&id)
 	if err != nil {
-		f.errorLog.Println("postgresql error:", err)
+		f.errorLog.Println("failed to add a task:", err)
 		return "", fmt.Errorf("postgresql error: %w", err)
 	}
 	f.log.Println("new task created:", name, id)
 	return
+}
+
+func (f *kju) QueueTasks(
+	ctx context.Context, tasks []struct {
+		Name string
+		Data map[string]string
+	}) (taskIDs []string, err error) {
+	batch := pgx.Batch{}
+	for _, task := range tasks {
+		batch.Queue(
+			"INSERT INTO tasks (status, task, Data) VALUES ($1, $2, $3) RETURNING ID",
+			statusCreated, task.Name, task.Data,
+		)
+	}
+	batchResult := f.db.SendBatch(ctx, &batch)
+	defer batchResult.Close()
+	for i := 0; i < len(tasks); i++ {
+		var id string
+		err = batchResult.QueryRow().Scan(&id)
+		if err != nil {
+			f.errorLog.Println("failed to add a task:", err)
+			continue
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	f.log.Printf("%d new tasks created\n", len(taskIDs))
+	return taskIDs, err
 }
 
 func (f *kju) RegisterTask(name string, handler TaskHandler) error {
@@ -84,11 +111,6 @@ func (f *kju) RegisterTask(name string, handler TaskHandler) error {
 
 func (f *kju) Run() error {
 	f.log.Println("starting worker")
-	if len(f.cfg.Tasks) != 0 {
-		f.log.Println("processing tasks:", f.cfg.Tasks)
-	} else {
-		f.log.Println("processing all tasks")
-	}
 	ctx := f.setupTerminationHandler()
 	wg := NewCountableWaitGroup()
 	queue := make(chan *Task, f.cfg.QueueSize)
@@ -140,12 +162,7 @@ func (f *kju) fetchTasks(
 	queue chan<- *Task,
 ) {
 	defer wg.Done()
-	finished := false
 	for {
-		if f.cfg.RunUntilCompletion && finished {
-			close(queue)
-			return
-		}
 		select {
 		case <-ctx.Done():
 			close(queue)
@@ -155,16 +172,12 @@ func (f *kju) fetchTasks(
 			var tasks []*Task
 			err := f.db.BeginFunc(ctx, func(tx pgx.Tx) error {
 				limit := cap(queue) - len(queue)
-				var query string
-				var args []interface{}
-				if len(f.cfg.Tasks) == 0 {
-					query = "SELECT id, created, task, data FROM tasks WHERE status=$1 ORDER BY created LIMIT $2 FOR UPDATE"
-					args = []interface{}{string(statusCreated), limit}
-				} else {
-					query = "SELECT id, created, task, data FROM tasks WHERE status=$1 AND task=any($3) ORDER BY created LIMIT $2 FOR UPDATE"
-					args = []interface{}{string(statusCreated), limit, f.cfg.Tasks}
-				}
-				rows, err := tx.Query(ctx, query, args...)
+				rows, err := tx.Query(
+					ctx,
+					"SELECT id, created, task, data FROM tasks WHERE status=$1 ORDER BY created LIMIT $2 FOR UPDATE",
+					string(statusCreated),
+					limit,
+				)
 				defer rows.Close()
 				if err != nil {
 					f.errorLog.Println("error fetching tasks:", err)
@@ -190,8 +203,6 @@ func (f *kju) fetchTasks(
 				}
 				if counter != 0 {
 					f.log.Printf("%d task(s) found", counter)
-				} else if counter == 0 && f.cfg.RunUntilCompletion {
-					finished = true
 				}
 				return nil
 			})

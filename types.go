@@ -19,15 +19,10 @@ type Options struct {
 	// the only thing a worker can do is to cancel a context.
 	// Defaults to no timeout.
 	TaskTimeout time.Duration
-	// Which tasks a worker should execute.
-	// Defaults to all.
-	Tasks []string
 	// Time after which graceful shutdown will be abandoned and the worker
 	// will be killed.
 	// Defaults to TaskTimeout.
 	GracefulShutdownTimeout time.Duration
-	// If worker should exit when there are no more tasks to process.
-	RunUntilCompletion bool
 }
 
 type Task struct {
@@ -40,7 +35,15 @@ type Task struct {
 type TaskHandler func(context.Context, *Task) (succeeded bool)
 
 type Client interface {
-	QueueTask(ctx context.Context, name string, data map[string]string) (id string, err error)
+	QueueTask(
+		ctx context.Context,
+		name string,
+		data map[string]string,
+	) (id string, err error)
+	QueueTasks(ctx context.Context, tasks []struct {
+		Name string
+		Data map[string]string
+	}) ([]string, error)
 }
 
 type Worker interface {
