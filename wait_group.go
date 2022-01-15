@@ -6,51 +6,66 @@ import (
 	"time"
 )
 
-var _ CountableWaitGroup = &cwg{}
+var _ WaitGroup = &cwg{}
 
-type CountableWaitGroup interface {
-	// Add increments the CountableWaitGroup counter by 1.
-	Add()
-	// Done decrements the CountableWaitGroup counter by 1.
+type WaitGroup interface {
+	// Add increments the WaitGroup counter by delta.
+	Add(delta int)
+	// AddTask increments the WaitGroup task counter by 1.
+	AddTask()
+	// Done decrements the WaitGroup counter by 1.
 	Done()
-	// Wait returns a channel that's closed  when CountableWaitGroup
-	// counter is zero.
+	// TaskDone decrements the WaitGroup task counter by 1.
+	TaskDone()
+	// Wait returns a channel that's closed  when WaitGroup
+	// counters are zero.
 	Wait() <-chan struct{}
-	// WaitTimeout block until the CountableWaitGroup counter is zero
+	// WaitTimeout block until the WaitGroup counters are zero
 	// or the specified max timeout is reached. Returns zero if it exits
-	// normally or current value of counter in case of timeout.
+	// normally or current value of task counter in case of timeout.
 	WaitTimeout(timeout time.Duration) int
-	// Count returns the current value of CountableWaitGroup counter.
-	Count() int
+	// TaskCount returns the current value of WaitGroup task counter.
+	TaskCount() int
 }
 
-func NewCountableWaitGroup() CountableWaitGroup {
+func NewWaitGroup() WaitGroup {
 	var c int32
 	return &cwg{
 		wg:      &sync.WaitGroup{},
+		tasks:   &sync.WaitGroup{},
 		counter: &c,
 	}
 }
 
 type cwg struct {
 	wg      *sync.WaitGroup
+	tasks   *sync.WaitGroup
 	counter *int32
 }
 
-func (c *cwg) Add() {
+func (c *cwg) Add(delta int) {
+	c.wg.Add(delta)
+}
+
+func (c *cwg) AddTask() {
 	atomic.AddInt32(c.counter, int32(1))
-	c.wg.Add(1)
+	c.tasks.Add(1)
 }
 
 func (c *cwg) Done() {
-	atomic.AddInt32(c.counter, -1)
 	c.wg.Done()
+}
+
+func (c *cwg) TaskDone() {
+	atomic.AddInt32(c.counter, -1)
+	c.tasks.Done()
 }
 
 func (c *cwg) Wait() <-chan struct{} {
 	cc := make(chan struct{})
 	go func() {
 		defer close(cc)
+		c.tasks.Wait()
 		c.wg.Wait()
 	}()
 	return cc
@@ -66,10 +81,10 @@ func (c *cwg) WaitTimeout(timeout time.Duration) int {
 	case <-cc:
 		return 0
 	case <-time.After(timeout):
-		return c.Count()
+		return c.TaskCount()
 	}
 }
 
-func (c *cwg) Count() int {
+func (c *cwg) TaskCount() int {
 	return int(*c.counter)
 }

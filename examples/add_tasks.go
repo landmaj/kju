@@ -20,13 +20,13 @@ func main() {
 	}
 	defer db.Close()
 
-	AddTasks(db, 100_000)
+	AddTasks(db, 10_000)
 }
 
 func AddTasks(db *pgxpool.Pool, count int) {
 	client := kju.NewClient(db)
 
-	var queue []struct{
+	var queue []struct {
 		Name string
 		Data map[string]string
 	}
@@ -35,7 +35,7 @@ func AddTasks(db *pgxpool.Pool, count int) {
 			Name string
 			Data map[string]string
 		}{Name: "benchmark", Data: map[string]string{"ID": strconv.Itoa(i)}})
-		if i % 100 == 0 || i == count {
+		if i%100 == 0 || i == count {
 			_, err := client.QueueTasks(context.TODO(), queue)
 			if err != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "Unable to add some task: %v\n", err)

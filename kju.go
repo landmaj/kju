@@ -112,18 +112,17 @@ func (f *kju) RegisterTask(name string, handler TaskHandler) error {
 func (f *kju) Run() error {
 	f.log.Println("starting worker")
 	ctx := f.setupTerminationHandler()
-	wg := NewCountableWaitGroup()
+	wg := NewWaitGroup()
 	queue := make(chan *Task, f.cfg.QueueSize)
 
-	wg.Add()
+	wg.Add(2)
 	go f.fetchTasks(ctx, wg, queue)
-	wg.Add()
 	go f.dispatchTasks(ctx, wg, queue)
 
 	start := time.Now()
 	select {
 	case <-ctx.Done():
-		wg.Add()
+		wg.Add(1)
 		go f.clearQueue(wg, queue)
 		if f.cfg.GracefulShutdownTimeout == 0 {
 			<-wg.Wait()
@@ -158,7 +157,7 @@ func (f *kju) setupTerminationHandler() context.Context {
 
 func (f *kju) fetchTasks(
 	ctx context.Context,
-	wg CountableWaitGroup,
+	wg WaitGroup,
 	queue chan<- *Task,
 ) {
 	defer wg.Done()
@@ -218,22 +217,23 @@ func (f *kju) fetchTasks(
 
 func (f *kju) dispatchTasks(
 	ctx context.Context,
-	wg CountableWaitGroup,
+	wg WaitGroup,
 	queue <-chan *Task,
 ) {
 	defer wg.Done()
+	time.Sleep(time.Millisecond * 100) // wait for the app to start
 	for {
 		err := ctx.Err()
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		if wg.Count() < int(f.cfg.ConcurrencyLimit)+2 {
+		if wg.TaskCount() < int(f.cfg.ConcurrencyLimit) {
 			select {
 			case task, chOpen := <-queue:
 				if !chOpen {
 					return
 				}
-				wg.Add()
+				wg.AddTask()
 				go f.taskRunner(wg, task)
 			case <-time.After(time.Millisecond):
 				break
@@ -242,11 +242,11 @@ func (f *kju) dispatchTasks(
 	}
 }
 
-func (f *kju) taskRunner(wg CountableWaitGroup, task *Task) {
+func (f *kju) taskRunner(wg WaitGroup, task *Task) {
+	defer wg.TaskDone()
 	ctx := context.TODO()
 	start := time.Now()
 	f.log.Printf("[%s] starting task\n", task.ID)
-	defer wg.Done()
 	_, err := f.db.Exec(ctx, "UPDATE tasks SET status=$1 WHERE id=$2", string(statusInProgress), task.ID)
 	if err != nil {
 		f.errorLog.Printf("[%s] error updating status: %s\n", task.ID, err)
@@ -305,7 +305,7 @@ func (f *kju) catchPanic(ctx context.Context, id string) {
 }
 
 func (f *kju) clearQueue(
-	wg CountableWaitGroup,
+	wg WaitGroup,
 	queue <-chan *Task,
 ) {
 	defer wg.Done()
