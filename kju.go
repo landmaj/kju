@@ -2,16 +2,24 @@ package kju
 
 import (
 	"context"
+	"go.uber.org/zap"
 	"time"
 )
 
+type stats struct {
+	createdAt  time.Time
+	queuedAt   time.Time
+	startedAt  time.Time
+	finishedAt time.Time
+}
+
 type Task struct {
-	Handler   string
-	Data      map[string]string
-	id        string
-	status    taskStatus
-	createdAt time.Time
-	queuedAt  time.Time
+	Handler string
+	Data    map[string]string
+	id      string
+	status  taskStatus
+	logger  *zap.Logger
+	stats   *stats
 }
 
 type TaskHandler func(context.Context, *Task) error

@@ -1,11 +1,13 @@
 package kju
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v4"
 	"go.uber.org/zap"
 )
 
@@ -109,4 +111,24 @@ func terminationHandler(
 		}()
 	}()
 	return quit
+}
+
+func setTaskStatuses(
+	batcher interface {
+		SendBatch(ctx context.Context, batch *pgx.Batch) pgx.BatchResults
+	},
+	tasks []*Task,
+) {
+	batch := &pgx.Batch{}
+	for _, t := range tasks {
+		batch.Queue(querySetTaskStatus, string(t.status), t.id)
+	}
+	result := batcher.SendBatch(context.TODO(), batch)
+	defer result.Close()
+	for _, t := range tasks {
+		_, err := result.Query()
+		if err != nil {
+			t.logger.Error("failed to set task status")
+		}
+	}
 }

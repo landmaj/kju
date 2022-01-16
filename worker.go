@@ -106,7 +106,7 @@ func (w *worker) fetchTasks(quit <-chan struct{}) {
 					tasks = append(tasks, task)
 				}
 				w.logger.Debug("returning tasks to database")
-				w.setTaskStatuses(tasks)
+				setTaskStatuses(w.db, tasks)
 				return
 			case <-time.After(w.cfg.FetchInterval):
 				var tasks []*Task
@@ -119,16 +119,20 @@ func (w *worker) fetchTasks(quit <-chan struct{}) {
 					}
 					for rows.Next() {
 						task := &Task{
-							status:   statusLocked,
-							queuedAt: time.Now(),
+							status: statusLocked,
+							stats:  &stats{queuedAt: time.Now()},
 						}
-						err := rows.Scan(&task.id, &task.createdAt, &task.Handler, &task.Data)
+						err := rows.Scan(&task.id, &task.stats.createdAt, &task.Handler, &task.Data)
 						if err != nil {
 							w.logger.Error("failed to fetch a task", zap.Error(err))
 						}
+						task.logger = w.logger.With(
+							zap.String("id", task.id),
+							zap.String("handler", task.Handler),
+						)
 						tasks = append(tasks, task)
 					}
-					w.setTaskStatusesTx(tx, tasks)
+					setTaskStatuses(tx, tasks)
 					return nil
 				})
 				if err != nil {
@@ -186,7 +190,7 @@ func (w *worker) finishTasks(queue <-chan *Task) {
 				tasks = append(tasks, task)
 			}
 			if (len(tasks) == w.cfg.ResultBatchSize || !more) && len(tasks) > 0 {
-				w.setTaskStatuses(tasks)
+				setTaskStatuses(w.db, tasks)
 				tasks = nil
 			}
 			if !more {
@@ -196,83 +200,42 @@ func (w *worker) finishTasks(queue <-chan *Task) {
 	}()
 }
 
-func (w *worker) setTaskStatuses(tasks []*Task) {
-	batch := &pgx.Batch{}
-	for _, t := range tasks {
-		batch.Queue(querySetTaskStatus, string(t.status), t.id)
-	}
-	result := w.db.SendBatch(context.TODO(), batch)
-	defer result.Close()
-	for _, t := range tasks {
-		_, err := result.Query()
-		if err != nil {
-			w.logger.Error(
-				"failed to set task status",
-				zap.String("ID", t.id),
-				zap.String("status", string(t.status)),
-			)
-		}
-	}
-}
-
-func (w *worker) setTaskStatusesTx(tx pgx.Tx, tasks []*Task) {
-	batch := &pgx.Batch{}
-	for _, t := range tasks {
-		batch.Queue(querySetTaskStatus, string(t.status), t.id)
-	}
-	result := tx.SendBatch(context.TODO(), batch)
-	defer result.Close()
-	for _, t := range tasks {
-		_, err := result.Query()
-		if err != nil {
-			w.logger.Error(
-				"failed to set task status",
-				zap.String("ID", t.id),
-				zap.String("status", string(t.status)),
-			)
-		}
-	}
-}
-
 func (w *worker) runTask(task *Task, queue chan<- *Task) {
 	w.wg.AddTask()
 	go func() {
 		defer w.wg.TaskDone()
 
-		logger := w.logger.With(
-			zap.String("ID", task.id),
-			zap.String("handler", task.Handler),
-		)
-		logger.Info("task running")
+		task.logger.Info("task running")
 		handler := w.handlersMap[task.Handler]
 		{
+			var err error
+
 			defer func() {
 				r := recover()
 				if r != nil {
+					err = fmt.Errorf("%v", r)
+				}
+				logger := task.logger.With(
+					zap.Duration("lifetime", task.stats.finishedAt.Sub(task.stats.createdAt).Round(time.Second)),
+					zap.Duration("queue", task.stats.startedAt.Sub(task.stats.queuedAt).Round(time.Millisecond)),
+					zap.Duration("execution", task.stats.finishedAt.Sub(task.stats.startedAt)),
+				)
+				if err != nil {
 					task.status = statusFailed
-					logger.Error("task panicked", zap.Error(fmt.Errorf("%v", r)))
+					logger.Error("task failed")
+				} else {
+					task.status = statusFinished
+					logger.Info("task finished")
 				}
 				queue <- task
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), w.cfg.TaskTimeout)
 			defer cancel()
-			start := time.Now()
-			err := handler(ctx, task)
-			now := time.Now()
-			logger = logger.With(
-				zap.Duration("execution", now.Sub(start)),
-				zap.Duration("queued", now.Sub(task.queuedAt).Round(time.Millisecond)),
-				zap.Duration("lifetime", now.Sub(task.createdAt).Round(time.Second)),
-			)
-			if err != nil {
-				task.status = statusFailed
-				logger.Error("task failed", zap.Error(err))
-			} else {
-				task.status = statusFinished
-				logger.Info("task successful")
-			}
-		}
 
+			task.stats.startedAt = time.Now()
+			err = handler(ctx, task)
+			task.stats.finishedAt = time.Now()
+		}
 	}()
 }
