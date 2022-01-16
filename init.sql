@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TYPE task_status AS ENUM ('created', 'queued', 'in_progress', 'succeeded', 'failed');
+CREATE TYPE task_status AS ENUM ('created', 'locked', 'finished', 'failed');
 
 CREATE TABLE tasks
 (
@@ -8,13 +8,13 @@ CREATE TABLE tasks
     created  timestamp   not null default now(),
     modified timestamp,
     status   task_status not null,
-    task     text        not null,
+    handler  text        not null,
     data     jsonb       not null
 );
 
-CREATE INDEX ON tasks(status);
-CREATE INDEX ON tasks(status, task);
-CREATE INDEX ON tasks(created);
+CREATE INDEX ON tasks (status);
+CREATE INDEX ON tasks (status, handler);
+CREATE INDEX ON tasks (created);
 
 CREATE OR REPLACE FUNCTION update_modified_column()
     RETURNS TRIGGER AS

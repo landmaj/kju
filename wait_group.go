@@ -3,88 +3,56 @@ package kju
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
-var _ WaitGroup = &cwg{}
-
-type WaitGroup interface {
-	// Add increments the WaitGroup counter by delta.
-	Add(delta int)
-	// AddTask increments the WaitGroup task counter by 1.
-	AddTask()
-	// Done decrements the WaitGroup counter by 1.
-	Done()
-	// TaskDone decrements the WaitGroup task counter by 1.
-	TaskDone()
-	// Wait returns a channel that's closed  when WaitGroup
-	// counters are zero.
-	Wait() <-chan struct{}
-	// WaitTimeout block until the WaitGroup counters are zero
-	// or the specified max timeout is reached. Returns zero if it exits
-	// normally or current value of task counter in case of timeout.
-	WaitTimeout(timeout time.Duration) int
-	// TaskCount returns the current value of WaitGroup task counter.
-	TaskCount() int
-}
-
-func NewWaitGroup() WaitGroup {
-	var c int32
-	return &cwg{
+func newCustomWaitGroup() *customWaitGroup {
+	var counter int32
+	return &customWaitGroup{
 		wg:      &sync.WaitGroup{},
 		tasks:   &sync.WaitGroup{},
-		counter: &c,
+		counter: &counter,
 	}
 }
 
-type cwg struct {
+type customWaitGroup struct {
 	wg      *sync.WaitGroup
 	tasks   *sync.WaitGroup
 	counter *int32
 }
 
-func (c *cwg) Add(delta int) {
+// Add increments the customWaitGroup counter by delta.
+func (c *customWaitGroup) Add(delta int) {
 	c.wg.Add(delta)
 }
 
-func (c *cwg) AddTask() {
+// AddTask increments the customWaitGroup task counter by 1.
+func (c *customWaitGroup) AddTask() {
 	atomic.AddInt32(c.counter, int32(1))
 	c.tasks.Add(1)
 }
 
-func (c *cwg) Done() {
+// Done decrements the customWaitGroup counter by 1.
+func (c *customWaitGroup) Done() {
 	c.wg.Done()
 }
 
-func (c *cwg) TaskDone() {
+// TaskDone decrements the customWaitGroup task counter by 1.
+func (c *customWaitGroup) TaskDone() {
 	atomic.AddInt32(c.counter, -1)
 	c.tasks.Done()
 }
 
-func (c *cwg) Wait() <-chan struct{} {
-	cc := make(chan struct{})
-	go func() {
-		defer close(cc)
-		c.tasks.Wait()
-		c.wg.Wait()
-	}()
-	return cc
+// Wait blocks until customWaitGroup main counter is zero.
+func (c *customWaitGroup) Wait() {
+	c.wg.Wait()
 }
 
-func (c *cwg) WaitTimeout(timeout time.Duration) int {
-	cc := make(chan struct{})
-	go func() {
-		defer close(cc)
-		<-c.Wait()
-	}()
-	select {
-	case <-cc:
-		return 0
-	case <-time.After(timeout):
-		return c.TaskCount()
-	}
+// WaitTasks blocks until customWaitGroup task counter is zero.
+func (c *customWaitGroup) WaitTasks() {
+	c.tasks.Wait()
 }
 
-func (c *cwg) TaskCount() int {
+// TaskCount returns the current value of customWaitGroup task counter.
+func (c *customWaitGroup) TaskCount() int {
 	return int(*c.counter)
 }
