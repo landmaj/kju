@@ -4,12 +4,12 @@ CREATE TYPE task_status AS ENUM ('created', 'locked', 'finished', 'failed');
 
 CREATE TABLE tasks
 (
-    id       text primary key     default gen_random_uuid(),
-    created  timestamp   not null default now(),
-    modified timestamp,
-    status   task_status not null,
-    handler  text        not null,
-    data     jsonb       not null
+    id       text primary key                  default gen_random_uuid(),
+    created  timestamp with time zone not null default now(),
+    modified timestamp with time zone,
+    status   task_status              not null,
+    handler  text                     not null,
+    data     jsonb                    not null
 );
 
 CREATE INDEX ON tasks (status);

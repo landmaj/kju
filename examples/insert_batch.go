@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/landmaj/kju"
+
+	"github.com/jackc/pgx/v4/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -23,10 +24,10 @@ func main() {
 	}
 	defer db.Close()
 
-	AddTasks(db, 10_000)
+	AddTasksBatch(db, 10_000)
 }
 
-func AddTasks(db *pgxpool.Pool, count int) {
+func AddTasksBatch(db *pgxpool.Pool, count int) {
 	logger, _ := zap.NewDevelopment()
 	client := kju.NewClient(db, logger)
 

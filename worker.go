@@ -119,10 +119,10 @@ func (w *worker) fetchTasks(quit <-chan struct{}) {
 					}
 					for rows.Next() {
 						task := &Task{
-							status: statusLocked,
-							stats:  &stats{queuedAt: time.Now()},
+							status:     statusLocked,
+							timestamps: &timestamps{queuedAt: time.Now()},
 						}
-						err := rows.Scan(&task.id, &task.stats.createdAt, &task.Handler, &task.Data)
+						err := rows.Scan(&task.id, &task.timestamps.createdAt, &task.Handler, &task.Data)
 						if err != nil {
 							w.logger.Error("failed to fetch a task", zap.Error(err))
 						}
@@ -216,9 +216,17 @@ func (w *worker) runTask(task *Task, queue chan<- *Task) {
 					err = fmt.Errorf("%v", r)
 				}
 				logger := task.logger.With(
-					zap.Duration("lifetime", task.stats.finishedAt.Sub(task.stats.createdAt).Round(time.Second)),
-					zap.Duration("queue", task.stats.startedAt.Sub(task.stats.queuedAt).Round(time.Millisecond)),
-					zap.Duration("execution", task.stats.finishedAt.Sub(task.stats.startedAt)),
+					zap.Duration(
+						"time_lifecycle",
+						task.timestamps.finishedAt.Sub(task.timestamps.createdAt).Round(time.Second),
+					),
+					zap.Duration(
+						"time_queue",
+						task.timestamps.startedAt.Sub(task.timestamps.queuedAt).Round(time.Millisecond)),
+					zap.Duration(
+						"time_execution",
+						task.timestamps.finishedAt.Sub(task.timestamps.startedAt),
+					),
 				)
 				if err != nil {
 					task.status = statusFailed
@@ -233,9 +241,9 @@ func (w *worker) runTask(task *Task, queue chan<- *Task) {
 			ctx, cancel := context.WithTimeout(context.Background(), w.cfg.TaskTimeout)
 			defer cancel()
 
-			task.stats.startedAt = time.Now()
+			task.timestamps.startedAt = time.Now()
 			err = handler(ctx, task)
-			task.stats.finishedAt = time.Now()
+			task.timestamps.finishedAt = time.Now()
 		}
 	}()
 }

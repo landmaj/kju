@@ -6,8 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/landmaj/kju"
+
+	"github.com/jackc/pgx/v4/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -26,10 +27,14 @@ func main() {
 		FetchInterval:           time.Millisecond * 100,
 		ConcurrencyLimit:        50,
 		TaskQueueSize:           100,
+		ResultQueueSize:         50,
+		ResultBatchSize:         10,
 		TaskTimeout:             time.Second * 5,
 		GracefulShutdownTimeout: time.Second * 10,
 	}
-	logger, _ := zap.NewDevelopment()
+	loggerCfg := zap.NewProductionConfig()
+	loggerCfg.OutputPaths = []string{"stdout", "log.json"}
+	logger, _ := loggerCfg.Build()
 
 	worker := kju.NewWorker(db, cfg, logger)
 	_ = worker.RegisterTask("benchmark", Handler)
