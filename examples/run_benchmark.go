@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/landmaj/kju"
@@ -37,10 +40,33 @@ func main() {
 	logger, _ := loggerCfg.Build()
 
 	worker := kju.NewWorker(db, cfg, logger)
-	_ = worker.RegisterTask("benchmark", Handler)
+	_ = worker.RegisterTask("benchmark", BenchmarkHandler)
+	_ = worker.RegisterTask("http", HttpHandler)
 	_ = worker.Run()
 }
 
-func Handler(ctx context.Context, task *kju.Task) error {
+func BenchmarkHandler(ctx context.Context, task *kju.Task) error {
+	return nil
+}
+
+func HttpHandler(ctx context.Context, task *kju.Task) error {
+	url := task.Data["url"]
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	splitted := strings.Split(url, "/")
+	filename := splitted[len(splitted)-1]
+	err = os.WriteFile(fmt.Sprintf("pages/%s.html", filename), body, 0644)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 	return nil
 }

@@ -24,7 +24,8 @@ func main() {
 	}
 	defer db.Close()
 
-	AddTasksBatch(db, 10_000)
+	//AddTasksBatch(db, 10_000)
+	AddDomains(db, 1000)
 }
 
 func AddTasksBatch(db *pgxpool.Pool, count int) {
@@ -33,11 +34,38 @@ func AddTasksBatch(db *pgxpool.Pool, count int) {
 
 	start := time.Now()
 	var queue []*kju.Task
-	for i := 1; i != count; i++ {
+	for i := 0; i != count; i++ {
 		queue = append(queue, &kju.Task{
 			Handler: "benchmark", Data: map[string]string{"ID": strconv.Itoa(i)},
 		})
-		if i%100 == 0 || i == count {
+		if i%100 == 0 || i == count-1 {
+			_, _ = client.QueueTasks(context.TODO(), queue)
+			queue = nil
+		}
+	}
+	logger.Info(
+		"finished",
+		zap.Duration("runtime", time.Now().Sub(start).Round(time.Millisecond)),
+		zap.Int("rows", count),
+	)
+}
+
+func AddDomains(db *pgxpool.Pool, count int) {
+	logger, _ := zap.NewDevelopment()
+	client := kju.NewClient(db, logger)
+
+	start := time.Now()
+	var queue []*kju.Task
+	for i := 0; i != count; i++ {
+		data := map[string]string{
+			"id":  strconv.Itoa(i),
+			"url": fmt.Sprintf("https://www.wikidata.org/wiki/Q%d", i),
+		}
+		if i%5 == 0 {
+			data["divisible"] = "true"
+		}
+		queue = append(queue, &kju.Task{Handler: "http", Data: data})
+		if i%100 == 0 || i == count-1 {
 			_, _ = client.QueueTasks(context.TODO(), queue)
 			queue = nil
 		}

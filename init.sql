@@ -12,7 +12,6 @@ CREATE TABLE tasks
     data     jsonb                    not null
 );
 
-CREATE INDEX ON tasks (status);
 CREATE INDEX ON tasks (status, handler);
 CREATE INDEX ON tasks (created);
 
